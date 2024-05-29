@@ -1,0 +1,75 @@
+volumes:
+  surrealdb:
+
+networks:
+  internal:
+    driver: bridge
+
+services:
+  warp-chat:
+    build:
+      context: .
+      dockerfile: ./backend/warp-chat/Dockerfile
+    command: cargo watch -x "run --bin warp-chat"
+    environment:
+      RUST_LOG: debug
+    networks:
+      - internal
+    ports:
+      - 3000:3000
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/warp-chat
+          target: /workspace/backend/warp-chat
+        - action: sync
+          path: ./backend/lib
+          target: /workspace/backend/lib
+        - action: rebuild
+          path: ./backend/warp-chat/Cargo.toml
+
+  surreal-events:
+    build:
+      context: .
+      dockerfile: ./backend/surreal-events/Dockerfile
+    command: cargo watch -x "run --bin surreal-events"
+    environment:
+      RUST_LOG: debug
+    networks:
+      - internal
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/surreal-events
+          target: /workspace/backend/surreal-events
+        - action: sync
+          path: ./backend/lib
+          target: /workspace/backend/lib
+        - action: rebuild
+          path: ./backend/surreal-events/Cargo.toml
+
+  surrealdb:
+    image: surrealdb/surrealdb:${SURREAL_VERSION:-v1.5.0}
+    entrypoint: 
+      - /surreal 
+      - start
+      - --user
+      - $SURREAL_USER
+      - --pass
+      - $SURREAL_PASS
+    environment:
+      RUST_LOG: debug
+      SURREAL_BIND: ${SURREAL_BIND:-0.0.0.0:8000}
+      SURREAL_LOG: ${SURREAL_LOG:-debug}
+      SURREAL_USER: ${SURREAL_USER:-admin}
+      SURREAL_PASS: ${SURREAL_PASS:-admin}
+      # SURREAL_KEY: <secret> # disk encryption
+      # SURREAL_PATH: ${SURREAL_PATH:-file://data/surreal.db}
+      # SURREAL_STRICT: false
+    volumes:
+      - surrealdb:/data
+    networks:
+      - internal
+    ports:
+      - 8000:8000
+      - 4317:4317

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>WebSocket Chat</title>
+</head>
+
+<body>
+  <h1>WebSocket Chat Example</h1>
+  <div id="status">
+    <p><em>disconnected</em></p>
+  </div>
+
+  <div style="display: flex">
+    <input id="username" style="display: block; width: 100px; box-sizing: border-box" type="text"
+      placeholder="username" />
+    <span id="user-id" style="color: lightgray"></span>
+  </div>
+  <button id="join-chat" type="button">Join Chat</button>
+  <textarea id="chat:test" style="
+        display: block;
+        width: 600px;
+        height: 400px;
+        box-sizing: border-box;
+      " cols="30" rows="10"></textarea>
+  <input id="input" style="display: block; width: 600px; box-sizing: border-box" type="text" placeholder="chat" />
+
+  <script>
+    const status = document.querySelector("#status");
+    const username = document.querySelector("#username");
+    const join_btn = document.querySelector("#join-chat");
+    const textarea = document.getElementById("chat:test");
+    const input = document.querySelector("#input");
+
+    join_btn.addEventListener("click", function (e) {
+      this.disabled = true;
+
+      const [_, chatId] = textarea.id.split(":");
+      const websocket = new WebSocket("ws://localhost:3000/ws");
+
+      websocket.onopen = function () {
+        console.log("connection opened");
+        status.innerHTML = "<p><em>connected</em></p>";
+        websocket.send(username.value);
+      };
+
+      const btn = this;
+
+      websocket.onclose = function () {
+        console.log("connection closed");
+        btn.disabled = false;
+      };
+
+      websocket.onmessage = function (e) {
+        console.debug("received message: " + e.data);
+        const parsed = JSON.parse(e.data);
+        let username;
+        try {
+          const parsed = JSON.parse(e.data);
+          switch (parsed.type) {
+            case "userChanged":
+              username = parsed?.data?.username;
+              const [_, userId] = parsed?.data?.id?.split(":");
+              if (userId && username) {
+                document.querySelector("#user-id").innerText = userId;
+                websocket.send(
+                  JSON.stringify({
+                    type: "joinChat",
+                    user: "user:" + userId,
+                    data: {chat: "chat:" + chatId, username},
+                  }),
+                );
+              }
+              break;
+            case "userJoined":
+              username = parsed?.data?.username;
+              if (username) {
+                textarea.value += `${username} joined\r\n`;
+              }
+              break;
+            case "chatMessageSent":
+              username = parsed?.data?.username;
+              const text = parsed?.data?.text;
+              if (username && text) {
+                textarea.value += `${username}: ${text}\r\n`;
+              }
+              break;
+            default:
+              console.log("unknown message type: " + parsed.type);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      input.onkeydown = function (e) {
+        if (e.key == "Enter") {
+          const userId = document.querySelector("#user-id").innerText;
+          const username = document.querySelector("#username").value;
+          if (username && userId) {
+            const message = {
+              type: "sendChatMessage",
+              user: "user:" + userId,
+              data: {
+                chat: "chat:" + chatId,
+                username,
+                text: input.value,
+              },
+            };
+            websocket.send(JSON.stringify(message));
+            input.value = "";
+          }
+        }
+      };
+    });
+  </script>
+</body>
+
+</html>
