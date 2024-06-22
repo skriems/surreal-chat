@@ -1,16 +1,55 @@
 // #![deny(warnings)]
+mod chat;
+mod cli;
+mod events;
+mod process;
+mod processor;
+
 use anyhow::Result;
+use clap::ArgMatches;
+use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
-use lib::chats::db::{DBChat, DBCreateChatMessage, DBJoinChat};
-use lib::chats::get_chat;
-use lib::chats::messages::CreateChat;
-use surrealdb::engine::remote::ws::Client;
-use surrealdb::method::Stream;
-use tracing;
+use processor::processor;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use lib::client::SurrealDB;
-use lib::events::Event;
+
+async fn run(matches: &ArgMatches) -> Result<()> {
+    // connect to surrealdb
+    let db = SurrealDB::new().await?;
+
+    let brokers = matches
+        .get_one::<String>("brokers")
+        .expect("brokers argument is required");
+    let group_id = matches
+        .get_one::<String>("group-id")
+        .expect("group_id argument is required");
+    let input_topic = matches
+        .get_one::<String>("input-topic")
+        .expect("input-topic argument is required");
+    let output_topic = matches
+        .get_one::<String>("output-topic")
+        .expect("output-topic argument is required");
+    let num_workers = matches
+        .get_one::<usize>("workers")
+        .expect("workers argument is required");
+
+    (0..*num_workers)
+        .map(|_| {
+            tokio::spawn(processor(
+                brokers.to_owned(),
+                group_id.to_owned(),
+                input_topic.to_owned(),
+                output_topic.to_owned(),
+                db.clone(),
+            ))
+        })
+        .collect::<FuturesUnordered<_>>()
+        .for_each(|_| async { () })
+        .await;
+
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,68 +61,14 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // connect to surrealdb
-    let db = SurrealDB::new().await?;
+    let matches = cli::get_matches();
 
-    let mut stream: Stream<Client, Vec<Event>> = db.client.select("event").live().await?;
-
-    while let Some(result) = stream.next().await {
-        tracing::debug!("event notification: {:?}", &result);
-
-        let event = result?.data;
-
-        match event {
-            Event::JoinChat(payload) => {
-                let data = payload.data;
-                let user = payload.user;
-                if let Ok(Some(chat)) = get_chat(&db, &data.chat).await {
-                    if let Ok(Some(record)) = db
-                        .create_event(Event::UserJoined(DBJoinChat {
-                            user,
-                            data: data.clone(),
-                        }))
-                        .await
-                    {
-                        let mut events = chat.events;
-                        events.push(record.id);
-                        let _: Option<DBChat> = db
-                            .client
-                            .update(data.chat)
-                            .merge(CreateChat { events })
-                            .await?;
-                    } else {
-                        tracing::error!("couldn't create Event::UserJoined record..");
-                    }
-                } else {
-                    tracing::error!("couldn't get {:?}", &data.chat.to_raw());
-                }
-            }
-            Event::SendChatMessage(payload) => {
-                let data = payload.data;
-                let user = payload.user;
-                if let Ok(Some(chat)) = get_chat(&db, &data.chat).await {
-                    if let Ok(Some(record)) = db
-                        .create_event(Event::ChatMessageSent(DBCreateChatMessage {
-                            user,
-                            data: data.clone(),
-                        }))
-                        .await
-                    {
-                        let mut events = chat.events;
-                        events.push(record.id);
-                        let _: Option<DBChat> = db
-                            .client
-                            .update(data.chat)
-                            .merge(CreateChat { events })
-                            .await?;
-                    } else {
-                        tracing::error!("couldn't create Event::ChatMessageSent record..");
-                    }
-                } else {
-                    tracing::error!("couldn't get {:?}", &data.chat.to_raw());
-                }
-            }
-            _ => tracing::trace!("unhandled event: {:?}", event),
+    match matches.subcommand() {
+        Some(("run", sub_matches)) => {
+            run(sub_matches).await?;
+        }
+        _ => {
+            unimplemented!();
         }
     }
     Ok(())
