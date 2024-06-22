@@ -10,9 +10,10 @@ services:
     build:
       context: .
       dockerfile: ./backend/warp-chat/Dockerfile
-    command: cargo watch -x "run --bin warp-chat"
+    command: cargo watch -x "run --bin warp-chat run"
     environment:
       RUST_LOG: debug
+      KAFKA_BROKER: kafka:29092
     networks:
       - internal
     ports:
@@ -32,11 +33,17 @@ services:
     build:
       context: .
       dockerfile: ./backend/surreal-events/Dockerfile
-    command: cargo watch -x "run --bin surreal-events"
+    command: cargo watch -x "run --bin surreal-events run"
     environment:
       RUST_LOG: debug
+      KAFKA_BROKER: kafka:29092
+      KAFKA_INPUT_TOPIC: commands
+      KAFKA_OUTPUT_TOPIC: events
     networks:
       - internal
+    depends_on:
+      - kafka
+      - surrealdb
     develop:
       watch:
         - action: sync
@@ -50,17 +57,17 @@ services:
 
   surrealdb:
     image: surrealdb/surrealdb:${SURREAL_VERSION:-v1.5.0}
-    entrypoint: 
-      - /surreal 
+    entrypoint:
+      - /surreal
       - start
       - --user
       - $SURREAL_USER
       - --pass
       - $SURREAL_PASS
     environment:
-      RUST_LOG: debug
+      RUST_LOG: info
       SURREAL_BIND: ${SURREAL_BIND:-0.0.0.0:8000}
-      SURREAL_LOG: ${SURREAL_LOG:-debug}
+      SURREAL_LOG: ${SURREAL_LOG:-info}
       SURREAL_USER: ${SURREAL_USER:-admin}
       SURREAL_PASS: ${SURREAL_PASS:-admin}
       # SURREAL_KEY: <secret> # disk encryption
@@ -72,4 +79,60 @@ services:
       - internal
     ports:
       - 8000:8000
-      - 4317:4317
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:${KAFKA_UI_VERSION:-latest}
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      # KAFKA_CLUSTERS_0_METRICS_PORT: 9997
+      # KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8085
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: first
+      # KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect0:8083
+      DYNAMIC_CONFIG_ENABLED: "true" # not necessary, added for tests
+      KAFKA_CLUSTERS_0_AUDIT_TOPICAUDITENABLED: "true"
+      KAFKA_CLUSTERS_0_AUDIT_CONSOLEAUDITENABLED: "true"
+    networks:
+      - internal
+    ports:
+      - 8080:8080
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka
+    healthcheck:
+      test: curl -fail --silent http://kafka-1:8090/kafka/v3/clusters/ --output /dev/null || exit 1
+      interval: 10s
+      retries: 10
+      start_period: 20s
+    environment:
+      # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid" 
+      # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+
+      # KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: 'kafka:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+    networks:
+      - internal
+    ports:
+      - 9092:9092
+      - 9101:9101

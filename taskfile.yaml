@@ -1,5 +1,7 @@
 version: 3
 
 tasks:
+  dev:
+    cmd: docker compose watch
   surreal-client:
     cmd: docker compose run --rm -i --remove-orphans --entrypoint /surreal surrealdb sql -e ws://surrealdb:8000 --user admin --pass admin --pretty {{ .CLI_ARGS }}
