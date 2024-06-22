@@ -6,13 +6,16 @@ publish = false
 
 [dependencies]
 lib = { path = "../lib" }
-anyhow = { workspace = true }
-futures-util = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-surrealdb = { version = "1.5.0" }
-tokio = { workspace = true }
-tokio-stream = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+anyhow.workspace = true
+clap.workspace = true
+futures-util.workspace = true
+rdkafka.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
 warp = { version = "0.3.7", features = ["websocket"] }

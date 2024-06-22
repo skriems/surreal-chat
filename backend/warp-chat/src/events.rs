@@ -1,38 +1,58 @@
+use std::time::Duration;
+
 use anyhow::anyhow;
 use futures_util::stream::StreamExt;
-use surrealdb::{engine::remote::ws::Client, method::Stream};
+use lib::surreal::{chat::get_or_create_chat, EventMessage, SurrealEvent};
+use rdkafka::producer::{FutureProducer, FutureRecord};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use surrealdb::Notification;
 use tokio::sync::mpsc::UnboundedSender;
 use warp::filters::ws::Message;
 
-use lib::actions::Action;
-use lib::chats::{db::DBChat, get_or_create_chat};
-use lib::{client::SurrealDB, events::Event};
+use lib::client::SurrealDB;
 
-pub async fn spawn_action_task(
+pub async fn spawn_task(
     db: SurrealDB,
+    producer: FutureProducer,
     msg: &str,
     tx: UnboundedSender<Message>,
 ) -> anyhow::Result<()> {
-    let action = serde_json::from_str::<Action>(msg)?;
-    tracing::debug!("spawning task to handle_action: {:?}", &action);
+    let event = serde_json::from_str::<EventMessage>(msg)?;
+
+    match producer
+        .send(
+            FutureRecord::to("commands").key("commands").payload(msg),
+            Duration::from_secs(1000),
+        )
+        .await
+    {
+        Ok(delivery) => tracing::info!("kafka message sent: {:?}", delivery),
+        Err((e, _)) => return Err(anyhow!("kafka error: {:?}", e)),
+    }
+
     tokio::spawn(async move {
-        if let Err(e) = handle_action(db, &action, tx).await {
-            tracing::error!("handle_action error: {:?}", e);
+        if let Err(e) = handle_event(&event, db, tx).await {
+            tracing::error!("handle_event error: {:?}", e);
         }
     });
     Ok(())
 }
 
-pub async fn handle_action(
+#[derive(Debug, Deserialize, Serialize)]
+struct EventNotification {
+    event: SurrealEvent,
+    username: String,
+}
+
+pub async fn handle_event(
+    event: &EventMessage,
     db: SurrealDB,
-    action: &Action,
     tx: UnboundedSender<Message>,
 ) -> anyhow::Result<()> {
-
-    db.create_action(action.to_owned()).await?;
-
-    match action {
-        Action::JoinChat(payload) => {
+    tracing::debug!("handle_event: {:?}", &event);
+    match event {
+        EventMessage::JoinChat(payload) => {
             let chat_thing = payload.data.chat.to_owned();
             let chat = get_or_create_chat(&db, &chat_thing).await?;
 
@@ -40,23 +60,46 @@ pub async fn handle_action(
                 return Err(anyhow!("task: couldn't get or create chat.."));
             }
 
-            let mut stream: Stream<Client, Option<DBChat>> =
-                db.client.select(chat_thing).live().await?;
+            let sql = format!(
+                "LIVE SELECT out.* as event, out.data.user.username as username FROM chat_events WHERE in = {};",
+                &chat_thing.to_raw()
+            );
 
+            let mut response = db.client.query(sql).await?;
+
+            tracing::debug!("LIVE SELECT: {:?}", &response);
+
+            let mut stream = response.stream::<Notification<EventNotification>>(0)?;
             while let Some(result) = stream.next().await {
-                tracing::debug!("task: notification: {:?}", &result);
-                let chat = result?.data;
-                if let Some(event_thing) = chat.events.last() {
-                    let event_option: Option<Event> = db.client.select(event_thing).await?;
-                    if let Some(event) = event_option {
-                        if let Ok(json) = serde_json::to_string::<Action>(&event.into()) {
-                            tx.send(Message::text(json))?;
-                        }
+                tracing::debug!("notification: {:?}", &result);
+                let notification: EventNotification = result?.data;
+                let event_message: EventMessage = notification.event.into();
+
+                let message: Option<Value> = match &event_message {
+                    EventMessage::ChatJoined(m) => Some(json!({
+                        "type": "chatJoined",
+                        "created_at": m.created_at,
+                        "username": notification.username,
+                    })),
+                    EventMessage::ChatMessageSent(m) => Some(json!({
+                        "type": "chatMessageSent",
+                        "created_at": m.created_at,
+                        "username": notification.username,
+                        "text": m.data.text,
+                    })),
+                    _ => {
+                        tracing::trace!("unhandled event: {:?}", event_message);
+                        None
                     }
+                };
+
+                match message {
+                    Some(message) => tx.send(Message::text(message.to_string()))?,
+                    None => tracing::debug!("no message to send for event: {:?}", event_message),
                 }
             }
         }
-        _ => tracing::trace!("unhandled event: {:?}", action),
+        _ => tracing::trace!("unhandled event: {:?}", event),
     }
     Ok(())
 }

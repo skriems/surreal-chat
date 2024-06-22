@@ -5,6 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use events::events;
 use lib::client::SurrealDB;
+use rdkafka::producer::FutureProducer;
 use tokio::sync::{mpsc, RwLock};
 use warp::ws::Message;
 use warp::Filter;
@@ -24,13 +25,14 @@ pub fn with_db(
 
 pub fn get_routes(
     db: SurrealDB,
+    producer: FutureProducer,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let users = Users::default();
     let subscriptions = Subscriptions::default();
 
     let index = warp::path::end().map(|| warp::reply::html(std::include_str!("../../chat.html")));
     index
-        .or(websocket(db.clone(), users, subscriptions))
+        .or(websocket(db.clone(), producer, users, subscriptions))
         .or(events(db))
         .with(warp::log("warp"))
 }

@@ -68,20 +68,24 @@
                   JSON.stringify({
                     type: "joinChat",
                     user: "user:" + userId,
-                    data: {chat: "chat:" + chatId, username},
+                    data: {
+                      chat: "chat:" + chatId,
+                      user: "user:" + userId,
+                      username,
+                    },
                   }),
                 );
               }
               break;
-            case "userJoined":
-              username = parsed?.data?.username;
+            case "chatJoined":
+              username = parsed?.username;
               if (username) {
                 textarea.value += `${username} joined\r\n`;
               }
               break;
             case "chatMessageSent":
-              username = parsed?.data?.username;
-              const text = parsed?.data?.text;
+              username = parsed?.username;
+              const text = parsed?.text;
               if (username && text) {
                 textarea.value += `${username}: ${text}\r\n`;
               }
@@ -101,10 +105,9 @@
           if (username && userId) {
             const message = {
               type: "sendChatMessage",
-              user: "user:" + userId,
               data: {
+                user: "user:" + userId,
                 chat: "chat:" + chatId,
-                username,
                 text: input.value,
               },
             };

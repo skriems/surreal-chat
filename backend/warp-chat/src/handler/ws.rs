@@ -1,49 +1,66 @@
 // #![deny(warnings)]
-use crate::events::spawn_action_task;
-use crate::routes::{Subscriptions, Users};
-use futures_util::{SinkExt, StreamExt, TryFutureExt};
-use lib::actions::Action;
-use lib::client::SurrealDB;
-use lib::users::db::DBUser;
-use lib::users::messages::{User, UserChanged};
-use lib::users::{create_user, get_user};
+use futures_util::{SinkExt, StreamExt};
+use lib::surreal::user::get_or_create_user;
+use rdkafka::producer::FutureProducer;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing;
 use warp::ws::{Message, WebSocket};
 
-pub async fn on_upgrade(ws: WebSocket, users: Users, _subscriptions: Subscriptions, db: SurrealDB) {
+use crate::events::spawn_task;
+use crate::routes::{Subscriptions, Users};
+
+use lib::client::SurrealDB;
+use lib::surreal::user::models::{DBUserMessage, DBUserMessageData};
+use lib::surreal::EventMessage;
+
+pub async fn on_upgrade(
+    ws: WebSocket,
+    users: Users,
+    _subscriptions: Subscriptions,
+    db: SurrealDB,
+    producer: FutureProducer,
+) {
     // Split the socket into a sender and receiver of messages.
     let (mut sender, mut receiver) = ws.split();
 
     // 1st thing after upgrade, get or create the user in the db
-    let mut user: Option<DBUser> = None;
+    let mut user: Option<DBUserMessageData> = None;
     while let Some(Ok(message)) = receiver.next().await {
         if let Ok(msg) = message.to_str() {
             tracing::debug!("user connected: {:?}", &msg);
-
-            if let Ok(Some(usr)) = get_user(&db, msg).await {
-                user = Some(usr);
-            }
-            if user.is_none() {
-                if let Ok(Some(usr)) = create_user(&db, msg).await {
-                    user = Some(usr);
+            match get_or_create_user(&db, msg).await {
+                Ok(maybe_user) => {
+                    tracing::debug!("user: {:?}", &maybe_user);
+                    user = maybe_user;
                 }
-                tracing::debug!("created user {:?}", &user);
+                Err(e) => {
+                    tracing::warn!("get_or_create_user error: {:?}", &e);
+                }
             }
 
             if let Some(user) = &user {
-                let action = Action::UserChanged(UserChanged {
-                    user: user.id.to_owned(),
-                    data: User {
-                        id: user.id.to_owned(),
-                        username: user.username.to_owned(),
-                    },
-                });
-                if let Ok(json) = serde_json::to_string(&action) {
-                    let _ = sender.send(Message::text(json)).await;
+                let event = EventMessage::UserChanged(
+                    DBUserMessage {
+                        data: DBUserMessageData {
+                            id: user.id.to_owned(),
+                            username: user.username.to_owned(),
+                        },
+                        created_at: None,
+                    }
+                    .into(),
+                );
+
+                match serde_json::to_string(&event) {
+                    Ok(json) => {
+                        tracing::debug!("sending message: {:?}", &event);
+                        let _ = sender.send(Message::text(json)).await;
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("serde_json::to_string error: {:?}", &e);
+                    }
                 }
-                break;
             } else {
                 let _ = sender.send(Message::text("Couldn't get user..")).await;
                 return;
@@ -65,33 +82,39 @@ pub async fn on_upgrade(ws: WebSocket, users: Users, _subscriptions: Subscriptio
             .insert(user.username.to_owned(), tx.clone());
 
         // spawn a task that listens for internal messages from the unbounded channel
-        // and sends a message back to the user
+        // and sends a messages back to the user
         tokio::task::spawn(async move {
             while let Some(message) = rx.next().await {
-                sender
-                    .send(message)
-                    .unwrap_or_else(|e| {
-                        eprintln!("websocket send error: {}", e);
-                    })
-                    .await;
+                tracing::debug!("sending message: {:?}", &message);
+                if let Err(e) = sender.send(message).await {
+                    tracing::error!("websocket send error: {}", e);
+                }
             }
         });
 
         // every time the user sends a message spawn a task to handle it
         while let Some(result) = receiver.next().await {
+            tracing::debug!("received message: {:?}", &result);
+
             let msg = match result {
                 Ok(msg) => msg,
                 Err(e) => {
-                    eprintln!("websocket error(uid={}): {}", &user.username, e);
+                    tracing::error!("websocket error(uid={}): {}", &user.username, e);
                     break;
                 }
             };
 
-            tracing::debug!("received message: {:?}", &msg);
-
             if let Ok(msg) = msg.to_str() {
-                if let Err(error) = spawn_action_task(db.clone(), msg, tx.clone()).await {
-                    tracing::error!("handle_event error: {:?}", &error);
+                if let Err(error) = spawn_task(db.clone(), producer.clone(), msg, tx.clone()).await
+                {
+                    tracing::error!("spawn_action_task error: {:?}", &error);
+                    tx.send(Message::text(format!(
+                        "Error processing message: {:?}",
+                        &error
+                    )))
+                    .unwrap_or_else(|e| {
+                        tracing::error!("websocket send error: {}", e);
+                    })
                 }
             }
         }
@@ -101,7 +124,7 @@ pub async fn on_upgrade(ws: WebSocket, users: Users, _subscriptions: Subscriptio
     }
 }
 
-async fn user_message(user: &DBUser, msg: Message, users: &Users) {
+async fn user_message(user: &DBUserMessageData, msg: Message, users: &Users) {
     // Skip any non-Text messages...
     let msg = if let Ok(s) = msg.to_str() {
         s
@@ -124,7 +147,7 @@ async fn user_message(user: &DBUser, msg: Message, users: &Users) {
     }
 }
 
-async fn user_disconnected(user: &DBUser, users: &Users) {
+async fn user_disconnected(user: &DBUserMessageData, users: &Users) {
     tracing::info!("good bye: {}", &user.username);
 
     let msg = format!("{} left.", &user.username);
