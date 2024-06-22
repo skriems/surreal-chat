@@ -4,8 +4,7 @@ use surrealdb::opt::auth::Root;
 use surrealdb::sql::Thing;
 use surrealdb::{Result, Surreal};
 
-use crate::actions::{create_event, Action};
-use crate::events::Event;
+use crate::surreal::EventMessage;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Record {
@@ -31,18 +30,11 @@ impl SurrealDB {
         Ok(Self { client })
     }
 
-    pub async fn create_event(&self, event: Event) -> Result<Option<Record>> {
+    pub async fn create_event(&self, event: EventMessage) -> Result<Option<Record>> {
         let records: Vec<Record> = self.client.create("event").content(event).await?;
         if let Some(record) = records.first() {
             tracing::debug!("created event: {:?}", &record);
             return Ok(Some(record.to_owned()));
-        }
-        Ok(None)
-    }
-
-    pub async fn create_action(&self, action: Action) -> Result<Option<Record>> {
-        if let Some(event) = create_event(action) {
-            return self.create_event(event).await;
         }
         Ok(None)
     }

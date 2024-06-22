@@ -1,0 +1,3 @@
+struct ChatEventsNotification {
+    event: EventMessage
+}
