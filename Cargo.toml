@@ -2,11 +2,7 @@
 members = [
   "backend/lib",
   "backend/surreal-events",
-  "backend/warp-chat",
-
-  # "backend/tokio-consumer",
-  # "backend/tokio-producer",
-  # "backend/tokio-stream",
+  "backend/api-warp",
 ]
 resolver = "2"
 

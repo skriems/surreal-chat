@@ -142,6 +142,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
+name = "api-warp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "futures-util",
+ "lib",
+ "rdkafka",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+ "warp",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3781,26 +3801,6 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "warp-chat"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "futures",
- "futures-util",
- "lib",
- "rdkafka",
- "serde",
- "serde_json",
- "surrealdb",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
- "warp",
 ]
 
 [[package]]

@@ -6,11 +6,11 @@ networks:
     driver: bridge
 
 services:
-  warp-chat:
+  warp:
     build:
       context: .
-      dockerfile: ./backend/warp-chat/Dockerfile
-    command: cargo watch -x "run --bin warp-chat run"
+      dockerfile: ./backend/api-warp/Dockerfile
+    command: cargo watch -x "run --bin api-warp run"
     environment:
       RUST_LOG: debug
       KAFKA_BROKER: kafka:29092
@@ -21,13 +21,13 @@ services:
     develop:
       watch:
         - action: sync
-          path: ./backend/warp-chat
-          target: /workspace/backend/warp-chat
+          path: ./backend/api-warp
+          target: /workspace/backend/api-warp
         - action: sync
           path: ./backend/lib
           target: /workspace/backend/lib
         - action: rebuild
-          path: ./backend/warp-chat/Cargo.toml
+          path: ./backend/api-warp/Cargo.toml
 
   surreal-events:
     build:
