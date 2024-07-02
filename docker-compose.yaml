@@ -6,6 +6,33 @@ networks:
     driver: bridge
 
 services:
+  nextjs:
+    container_name: nextjs
+    build:
+      dockerfile: ./frontend/nextjs/Dockerfile
+      target: nextjs
+    command: pnpm run dev
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    ports:
+      - "3000:3000" # vite
+    networks:
+      - internal
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/nextjs
+          target: /prod/nextjs
+          ignore:
+            - .next
+            - node_modules
+        - action: rebuild
+          path: ./frontend/nextjs/package.json
+
   warp:
     build:
       context: .
@@ -17,7 +44,7 @@ services:
     networks:
       - internal
     ports:
-      - 3000:3000
+      - 8001:8080
     develop:
       watch:
         - action: sync
