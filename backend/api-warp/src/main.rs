@@ -44,7 +44,7 @@ async fn run(matches: &ArgMatches) -> Result<()> {
         .expect("Producer creation error");
 
     let routes = get_routes(client, producer);
-    let socket = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let socket = SocketAddr::from(([0, 0, 0, 0], 8080));
     tracing::debug!("listening on {}", &socket.to_string());
     warp::serve(routes).run(socket).await;
     Ok(())
@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warp=trace".into()),
+                .unwrap_or_else(|_| "api=trace".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

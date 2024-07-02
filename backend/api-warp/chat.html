@@ -37,7 +37,7 @@
       this.disabled = true;
 
       const [_, chatId] = textarea.id.split(":");
-      const websocket = new WebSocket("ws://localhost:3000/ws");
+      const websocket = new WebSocket("ws://localhost:8001/ws");
 
       websocket.onopen = function () {
         console.log("connection opened");

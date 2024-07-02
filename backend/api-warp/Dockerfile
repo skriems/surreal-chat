@@ -21,9 +21,9 @@ RUN cargo install cargo-watch
 WORKDIR /workspace
 
 COPY . .
-RUN cargo build --bin warp-chat
-CMD ["cargo", "watch", "-x", "run", "--bin", "warp-chat"]
-EXPOSE 3000
+RUN cargo build --bin api-warp
+CMD ["cargo", "watch", "-x", "run", "--bin", "api-warp"]
+EXPOSE 8080
 
 # FROM debian:bullseye-slim
 # RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*

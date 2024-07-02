@@ -1,15 +1,18 @@
+mod chat;
 mod events;
 mod ws;
 
 use std::{collections::HashMap, sync::Arc};
 
-use events::events;
-use lib::client::SurrealDB;
 use rdkafka::producer::FutureProducer;
 use tokio::sync::{mpsc, RwLock};
-use warp::ws::Message;
 use warp::Filter;
+use warp::ws::Message;
 use ws::websocket;
+
+use chat::chat;
+use events::events;
+use lib::client::SurrealDB;
 
 /// Our state of currently connected users.
 /// - Key is their id
@@ -33,6 +36,7 @@ pub fn get_routes(
     let index = warp::path::end().map(|| warp::reply::html(std::include_str!("../../chat.html")));
     index
         .or(websocket(db.clone(), producer, users, subscriptions))
-        .or(events(db))
+        .or(events(db.clone()))
+        .or(chat(db))
         .with(warp::log("warp"))
 }
